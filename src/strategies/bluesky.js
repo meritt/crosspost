@@ -10,6 +10,7 @@
 //-----------------------------------------------------------------------------
 
 import { detectFacets } from "../util/bluesky-facets.js";
+import { imageSize } from "image-size";
 import { validatePostOptions } from "../util/options.js";
 
 //-----------------------------------------------------------------------------
@@ -330,9 +331,12 @@ async function postMessage(options, session, message, postOptions) {
 				postOptions?.signal,
 			);
 
+			const { width, height } = imageSize(image.data);
+
 			images.push({
 				alt: image.alt || "",
 				image: result.blob,
+				aspectRatio: { width, height },
 			});
 		}
 

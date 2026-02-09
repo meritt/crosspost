@@ -7,8 +7,11 @@
 // Imports
 //-----------------------------------------------------------------------------
 
-import assert from "node:assert";
 import { BlueskyStrategy } from "../../src/strategies/bluesky.js";
+import assert from "node:assert";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { MockServer, FetchMocker } from "mentoss";
 
 //-----------------------------------------------------------------------------
@@ -68,6 +71,10 @@ const server = new MockServer(`https://${HOST}`);
 const fetchMocker = new FetchMocker({
 	servers: [server],
 });
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const FIXTURES_DIR = path.join(__dirname, "..", "fixtures", "images");
 
 //-----------------------------------------------------------------------------
 // Tests
@@ -356,7 +363,8 @@ describe("BlueskyStrategy", function () {
 
 		it("should successfully post a message with an image", async function () {
 			const text = "Hello, world!";
-			const imageData = new Uint8Array([1, 2, 3, 4]);
+			const imagePath = path.join(FIXTURES_DIR, "smiley.png");
+			const imageData = new Uint8Array(await fs.readFile(imagePath));
 
 			server.post(
 				{
@@ -415,6 +423,7 @@ describe("BlueskyStrategy", function () {
 									{
 										alt: "test image",
 										image: UPLOAD_BLOB_RESPONSE.blob,
+										aspectRatio: { width: 20, height: 19 },
 									},
 								],
 							},
@@ -665,9 +674,9 @@ describe("BlueskyStrategy", function () {
 					headers: {
 						"content-type": "application/json",
 					},
-					body: { 
+					body: {
 						error: "InvalidRequest",
-						message: "Handle not found"
+						message: "Handle not found",
 					},
 				},
 			);
@@ -802,7 +811,8 @@ describe("BlueskyStrategy", function () {
 		});
 
 		it("should truncate long URLs to 27 characters in posted text while preserving original URLs in facets", async function () {
-			const longUrl = "https://example.com/very/long/path/that/should/be/truncated/because/it/exceeds/the/limit";
+			const longUrl =
+				"https://example.com/very/long/path/that/should/be/truncated/because/it/exceeds/the/limit";
 			const text = `Check this out: ${longUrl}`;
 			const expectedTruncatedUrl = longUrl.substring(0, 24) + "...";
 			const expectedTruncatedText = `Check this out: ${expectedTruncatedUrl}`;
@@ -939,7 +949,8 @@ describe("BlueskyStrategy", function () {
 
 		it("should handle multiple URLs with mixed truncation", async function () {
 			const shortUrl = "https://example.com";
-			const longUrl = "https://example.org/very/long/path/that/should/be/truncated/because/it/exceeds/the/limit";
+			const longUrl =
+				"https://example.org/very/long/path/that/should/be/truncated/because/it/exceeds/the/limit";
 			const text = `Short: ${shortUrl} and long: ${longUrl}`;
 			const expectedTruncatedUrl = longUrl.substring(0, 24) + "...";
 			const expectedText = `Short: ${shortUrl} and long: ${expectedTruncatedUrl}`;
