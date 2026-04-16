@@ -114,8 +114,11 @@ orDetails":{"inputErrors":[{"description
 // Helpers
 //-----------------------------------------------------------------------------
 
-const POST_URL = "https://api.linkedin.com/v2/ugcPosts";
+const POST_URL = "https://api.linkedin.com/rest/posts";
 const USER_INFO_URL = "https://api.linkedin.com/v2/userinfo";
+const IMAGES_UPLOAD_URL =
+	"https://api.linkedin.com/rest/images?action=initializeUpload";
+const LINKEDIN_VERSION = "202604";
 
 /**
  * Retrieves the person URN from LinkedIn.
@@ -157,29 +160,21 @@ async function fetchPersonUrn(accessToken, signal) {
  * @throws {Error} When the request fails.
  */
 async function uploadImage(accessToken, personUrn, imageData, signal) {
-	const response = await fetch(
-		"https://api.linkedin.com/v2/assets?action=registerUpload",
-		{
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${accessToken}`,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({
-				registerUploadRequest: {
-					recipes: ["urn:li:digitalmediaRecipe:feedshare-image"],
-					owner: personUrn,
-					serviceRelationships: [
-						{
-							relationshipType: "OWNER",
-							identifier: "urn:li:userGeneratedContent",
-						},
-					],
-				},
-				signal,
-			}),
+	const response = await fetch(IMAGES_UPLOAD_URL, {
+		method: "POST",
+		headers: {
+			Authorization: `Bearer ${accessToken}`,
+			"Content-Type": "application/json",
+			"LinkedIn-Version": LINKEDIN_VERSION,
+			"X-Restli-Protocol-Version": "2.0.0",
 		},
-	);
+		body: JSON.stringify({
+			initializeUploadRequest: {
+				owner: personUrn,
+			},
+		}),
+		signal,
+	});
 
 	if (!response.ok) {
 		throw new Error(
@@ -188,23 +183,20 @@ async function uploadImage(accessToken, personUrn, imageData, signal) {
 	}
 
 	const {
-		value: { asset, uploadMechanism },
-	} = /** @type {LinkedInRequestUploadResponse} */ (await response.json());
-
-	const uploadResponse = await fetch(
-		uploadMechanism[
-			"com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"
-		].uploadUrl,
-		{
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${accessToken}`,
-				"Content-Type": "image/*",
-			},
-			body: imageData,
-			signal,
-		},
+		value: { image: imageUrn, uploadUrl },
+	} = /** @type {{ value: { image: string, uploadUrl: string } }} */ (
+		await response.json()
 	);
+
+	const uploadResponse = await fetch(uploadUrl, {
+		method: "PUT",
+		headers: {
+			Authorization: `Bearer ${accessToken}`,
+			"Content-Type": "image/*",
+		},
+		body: imageData,
+		signal,
+	});
 
 	if (!uploadResponse.ok) {
 		throw new Error(
@@ -212,7 +204,7 @@ async function uploadImage(accessToken, personUrn, imageData, signal) {
 		);
 	}
 
-	return asset;
+	return imageUrn;
 }
 
 /**
@@ -224,28 +216,25 @@ async function uploadImage(accessToken, personUrn, imageData, signal) {
  * @returns {Promise<LinkedInPostResponse>} A promise that resolves with the post data.
  */
 async function createPost(options, personUrn, message, postOptions) {
-	/** @type {LinkedInPostBody} */
+	/** @type {{ author: string, commentary: string, visibility: string, distribution: object, lifecycleState: string, isReshareDisabledByAuthor: boolean, content?: object }} */
 	const body = {
 		author: personUrn,
+		commentary: message,
+		visibility: "PUBLIC",
+		distribution: {
+			feedDistribution: "MAIN_FEED",
+			targetEntities: [],
+			thirdPartyDistributionChannels: [],
+		},
 		lifecycleState: "PUBLISHED",
-		specificContent: {
-			"com.linkedin.ugc.ShareContent": {
-				shareCommentary: {
-					text: message,
-				},
-				shareMediaCategory: "NONE",
-			},
-		},
-		visibility: {
-			"com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC",
-		},
+		isReshareDisabledByAuthor: false,
 	};
 
 	// handle image uploads if present
 	if (postOptions?.images?.length) {
 		const images = postOptions.images;
 
-		const mediaAssets = await Promise.all(
+		const imageUrns = await Promise.all(
 			images.map(image =>
 				uploadImage(
 					options.accessToken,
@@ -256,20 +245,23 @@ async function createPost(options, personUrn, message, postOptions) {
 			),
 		);
 
-		body.specificContent[
-			"com.linkedin.ugc.ShareContent"
-		].shareMediaCategory = "IMAGE";
-		body.specificContent["com.linkedin.ugc.ShareContent"].media =
-			mediaAssets.map((asset, index) => ({
-				status: "READY",
-				description: {
-					text: images[index].alt || "",
+		if (imageUrns.length === 1) {
+			body.content = {
+				media: {
+					id: imageUrns[0],
+					altText: images[0].alt || "",
 				},
-				media: asset,
-				title: {
-					text: "",
+			};
+		} else {
+			body.content = {
+				multiImage: {
+					images: imageUrns.map((id, index) => ({
+						id,
+						altText: images[index].alt || "",
+					})),
 				},
-			}));
+			};
+		}
 	}
 
 	const response = await fetch(POST_URL, {
@@ -277,6 +269,7 @@ async function createPost(options, personUrn, message, postOptions) {
 		headers: {
 			Authorization: `Bearer ${options.accessToken}`,
 			"Content-Type": "application/json",
+			"LinkedIn-Version": LINKEDIN_VERSION,
 			"X-Restli-Protocol-Version": "2.0.0",
 		},
 		body: JSON.stringify(body),
@@ -293,7 +286,9 @@ async function createPost(options, personUrn, message, postOptions) {
 		);
 	}
 
-	return /** @type {Promise<LinkedInPostResponse>} */ (response.json());
+	// New Posts API returns 201 with post ID in x-restli-id header
+	const postId = response.headers.get("x-restli-id");
+	return /** @type {LinkedInPostResponse} */ ({ id: postId });
 }
 
 //-----------------------------------------------------------------------------

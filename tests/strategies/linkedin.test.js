@@ -16,11 +16,12 @@ import { MockServer, FetchMocker } from "mentoss";
 //-----------------------------------------------------------------------------
 
 const ACCESS_TOKEN = "test-token-123";
-const POST_URL = "/v2/ugcPosts";
+const POST_URL = "/rest/posts";
+const LINKEDIN_VERSION = "202604";
+const POST_ID = "urn:li:share:123456789";
 
 const CREATE_POST_RESPONSE = {
-	id: "urn:li:share:123456789",
-	status: "SUCCESS",
+	id: POST_ID,
 };
 
 const USER_INFO_URL = "/v2/userinfo";
@@ -68,7 +69,7 @@ describe("LinkedInStrategy", () => {
 
 	describe("post", () => {
 		const options = { accessToken: ACCESS_TOKEN };
-		const UPLOAD_REGISTER_URL = "/v2/assets?action=registerUpload";
+		const UPLOAD_INIT_URL = "/rest/images?action=initializeUpload";
 		const UPLOAD_URL = "https://example.com/upload";
 
 		beforeEach(() => {
@@ -121,28 +122,26 @@ describe("LinkedInStrategy", () => {
 					headers: {
 						authorization: `Bearer ${ACCESS_TOKEN}`,
 						"content-type": "application/json",
+						"linkedin-version": LINKEDIN_VERSION,
 						"x-restli-protocol-version": "2.0.0",
 					},
 					body: {
 						author: `urn:li:person:${USER_INFO_RESPONSE.sub}`,
+						commentary: text,
+						visibility: "PUBLIC",
+						distribution: {
+							feedDistribution: "MAIN_FEED",
+							targetEntities: [],
+							thirdPartyDistributionChannels: [],
+						},
 						lifecycleState: "PUBLISHED",
-						specificContent: {
-							"com.linkedin.ugc.ShareContent": {
-								shareCommentary: {
-									text,
-								},
-								shareMediaCategory: "NONE",
-							},
-						},
-						visibility: {
-							"com.linkedin.ugc.MemberNetworkVisibility":
-								"PUBLIC",
-						},
+						isReshareDisabledByAuthor: false,
 					},
 				},
 				{
-					status: 200,
-					body: CREATE_POST_RESPONSE,
+					status: 201,
+					headers: { "x-restli-id": POST_ID },
+					body: "",
 				},
 			);
 
@@ -155,33 +154,35 @@ describe("LinkedInStrategy", () => {
 			const imageData = new Uint8Array([1, 2, 3, 4]);
 			const strategy = new LinkedInStrategy(options);
 
-			// Mock image upload registration endpoint
+			// Mock image upload initialization endpoint
 			server.post(
 				{
-					url: UPLOAD_REGISTER_URL,
+					url: UPLOAD_INIT_URL,
 					headers: {
 						authorization: `Bearer ${ACCESS_TOKEN}`,
 						"content-type": "application/json",
+						"linkedin-version": LINKEDIN_VERSION,
+						"x-restli-protocol-version": "2.0.0",
+					},
+					body: {
+						initializeUploadRequest: {
+							owner: `urn:li:person:${USER_INFO_RESPONSE.sub}`,
+						},
 					},
 				},
 				{
 					status: 200,
 					body: {
 						value: {
-							asset: "urn:li:image:123456789",
-							uploadMechanism: {
-								"com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest":
-									{
-										uploadUrl: UPLOAD_URL,
-									},
-							},
+							image: "urn:li:image:123456789",
+							uploadUrl: UPLOAD_URL,
 						},
 					},
 				},
 			);
 
 			// Mock image upload endpoint
-			server.post(
+			server.put(
 				{
 					url: UPLOAD_URL,
 					headers: {
@@ -201,40 +202,32 @@ describe("LinkedInStrategy", () => {
 					headers: {
 						authorization: `Bearer ${ACCESS_TOKEN}`,
 						"content-type": "application/json",
+						"linkedin-version": LINKEDIN_VERSION,
 						"x-restli-protocol-version": "2.0.0",
 					},
 					body: {
 						author: `urn:li:person:${USER_INFO_RESPONSE.sub}`,
-						lifecycleState: "PUBLISHED",
-						specificContent: {
-							"com.linkedin.ugc.ShareContent": {
-								shareCommentary: {
-									text,
-								},
-								shareMediaCategory: "IMAGE",
-								media: [
-									{
-										status: "READY",
-										description: {
-											text: "Test image",
-										},
-										media: "urn:li:image:123456789",
-										title: {
-											text: "",
-										},
-									},
-								],
-							},
+						commentary: text,
+						visibility: "PUBLIC",
+						distribution: {
+							feedDistribution: "MAIN_FEED",
+							targetEntities: [],
+							thirdPartyDistributionChannels: [],
 						},
-						visibility: {
-							"com.linkedin.ugc.MemberNetworkVisibility":
-								"PUBLIC",
+						lifecycleState: "PUBLISHED",
+						isReshareDisabledByAuthor: false,
+						content: {
+							media: {
+								id: "urn:li:image:123456789",
+								altText: "Test image",
+							},
 						},
 					},
 				},
 				{
-					status: 200,
-					body: CREATE_POST_RESPONSE,
+					status: 201,
+					headers: { "x-restli-id": POST_ID },
+					body: "",
 				},
 			);
 
@@ -244,6 +237,134 @@ describe("LinkedInStrategy", () => {
 						alt: "Test image",
 						data: imageData,
 					},
+				],
+			});
+
+			assert.deepStrictEqual(response, CREATE_POST_RESPONSE);
+		});
+
+		it("should successfully post a message with multiple images", async () => {
+			const text = "Hello, LinkedIn world!";
+			const imageData1 = new Uint8Array([1, 2, 3, 4]);
+			const imageData2 = new Uint8Array([5, 6, 7, 8]);
+			const strategy = new LinkedInStrategy(options);
+
+			// Mock first image upload initialization
+			server.post(
+				{
+					url: UPLOAD_INIT_URL,
+					headers: {
+						authorization: `Bearer ${ACCESS_TOKEN}`,
+						"content-type": "application/json",
+						"linkedin-version": LINKEDIN_VERSION,
+						"x-restli-protocol-version": "2.0.0",
+					},
+				},
+				{
+					status: 200,
+					body: {
+						value: {
+							image: "urn:li:image:111111111",
+							uploadUrl: UPLOAD_URL,
+						},
+					},
+				},
+			);
+
+			server.post(
+				{
+					url: UPLOAD_INIT_URL,
+					headers: {
+						authorization: `Bearer ${ACCESS_TOKEN}`,
+						"content-type": "application/json",
+						"linkedin-version": LINKEDIN_VERSION,
+						"x-restli-protocol-version": "2.0.0",
+					},
+				},
+				{
+					status: 200,
+					body: {
+						value: {
+							image: "urn:li:image:222222222",
+							uploadUrl: UPLOAD_URL,
+						},
+					},
+				},
+			);
+
+			server.put(
+				{
+					url: UPLOAD_URL,
+					headers: {
+						authorization: `Bearer ${ACCESS_TOKEN}`,
+						"content-type": "image/*",
+					},
+				},
+				{
+					status: 200,
+				},
+			);
+
+			server.put(
+				{
+					url: UPLOAD_URL,
+					headers: {
+						authorization: `Bearer ${ACCESS_TOKEN}`,
+						"content-type": "image/*",
+					},
+				},
+				{
+					status: 200,
+				},
+			);
+
+			server.post(
+				{
+					url: POST_URL,
+					headers: {
+						authorization: `Bearer ${ACCESS_TOKEN}`,
+						"content-type": "application/json",
+						"linkedin-version": LINKEDIN_VERSION,
+						"x-restli-protocol-version": "2.0.0",
+					},
+					body: {
+						author: `urn:li:person:${USER_INFO_RESPONSE.sub}`,
+						commentary: text,
+						visibility: "PUBLIC",
+						distribution: {
+							feedDistribution: "MAIN_FEED",
+							targetEntities: [],
+							thirdPartyDistributionChannels: [],
+						},
+						lifecycleState: "PUBLISHED",
+						isReshareDisabledByAuthor: false,
+						content: {
+							multiImage: {
+								images: [
+									{
+										id: "urn:li:image:111111111",
+										altText: "Image one",
+									},
+									{
+										id: "urn:li:image:222222222",
+										altText: "Image two",
+									},
+								],
+							},
+						},
+					},
+				},
+				{
+					status: 201,
+					headers: { "x-restli-id": POST_ID },
+					body: "",
+				},
+			);
+
+			const response = await strategy.post(text, {
+				images: [
+					{ alt: "Image one", data: imageData1 },
+					{ alt: "Image two", data: imageData2 },
 				],
 			});
 
@@ -291,28 +412,26 @@ describe("LinkedInStrategy", () => {
 					headers: {
 						authorization: `Bearer ${ACCESS_TOKEN}`,
 						"content-type": "application/json",
+						"linkedin-version": LINKEDIN_VERSION,
 						"x-restli-protocol-version": "2.0.0",
 					},
 					body: {
 						author: `urn:li:person:${USER_INFO_RESPONSE.sub}`,
+						commentary: text,
+						visibility: "PUBLIC",
+						distribution: {
+							feedDistribution: "MAIN_FEED",
+							targetEntities: [],
+							thirdPartyDistributionChannels: [],
+						},
 						lifecycleState: "PUBLISHED",
-						specificContent: {
-							"com.linkedin.ugc.ShareContent": {
-								shareCommentary: {
-									text,
-								},
-								shareMediaCategory: "NONE",
-							},
-						},
-						visibility: {
-							"com.linkedin.ugc.MemberNetworkVisibility":
-								"PUBLIC",
-						},
+						isReshareDisabledByAuthor: false,
 					},
 				},
 				{
-					status: 200,
-					body: CREATE_POST_RESPONSE,
+					status: 201,
+					headers: { "x-restli-id": POST_ID },
+					body: "",
 					delay: 100,
 				},
 			);

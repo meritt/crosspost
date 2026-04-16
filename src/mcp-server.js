@@ -122,7 +122,11 @@ function getSuccessMessage(response) {
 function getFailureMessage(response) {
 	let message = `Post to ${response.name} failed.`;
 	if (response.reason) {
-		message += ` Here's the server response: ${JSON.stringify(response.reason)}`;
+		const reason =
+			response.reason instanceof Error
+				? response.reason.message
+				: JSON.stringify(response.reason);
+		message += ` Here's the server response: ${reason}`;
 	}
 	return message;
 }

@@ -324,7 +324,7 @@ describe("CrossPostMcpServer", () => {
 				// Accept the actual output, which is an empty object stringified
 				assert.strictEqual(
 					result.content[0].text,
-					"Post to Mastodon failed. Here's the server response: {}",
+					"Post to Mastodon failed. Here's the server response: Failed to post",
 					"Should return human-readable error message for Mastodon",
 				);
 			});
